@@ -20,12 +20,18 @@ _Última atualização: 2026-07-01._
    navegador/máquina. Reabrir carrega sozinho; "Atualizar" só é usado quando a planilha muda.
 
 ## Como a coisa funciona (arquitetura no `index.html`)
-- **Boards** em `BOARDS`: `pedidos` (Transporte · Em reclamação · Comprou · Pós vendas)
+- **Boards** em `BOARDS`: `pedidos` (Transporte · Em reclamação · Comprou · Pós vendas · Cancelados)
   e `carrinhos` (Carrinhos · Fup 1 · Fup 2 · Ultimato · Pós vendas).
 - **Cores por etapa** em `COLORS`. Modal e cards herdam a cor da coluna.
 - **1 card = 1 pedido**: `importWorkbook()` agrupa linhas da planilha por `id`
   (fallback `numero_pedido`); produtos do pedido viram a lista de itens. Campos usados:
   `cliente`, `cliente_telefone`, `data`, `produto`, `quantidade`, `status`.
+- **Dedup de cancelados** (`importWorkbook`): se o cliente virou comprador (tem pedido
+  em `Em transporte`/`Pagamento aprovado`), os pedidos `Cancelado` dele vão pra coluna
+  **`Cancelados`** (em vez de ficarem em `Em reclamação`). Identidade do cliente por CPF
+  (`cliente_document`) → telefone → e-mail. Constantes `SUCCESS_STATUSES`/`CANCELLED_STATUS`.
+  Na planilha exemplo, 22 dos 37 cancelados vão pra `Cancelados`; os outros 15 (cliente que
+  não comprou) ficam em `Em reclamação`. **`Aguardando pagamento` NÃO conta como comprador**.
 - **De-para status → coluna** em `BOARD_STATUS_MAP[board]`; fallback `BOARD_DEFAULT_COL[board]`.
   - Pedidos: `Em transporte→transporte`, `Pagamento aprovado→comprou`,
     `Cancelado→reclamacao`, `Aguardando pagamento→comprou`.

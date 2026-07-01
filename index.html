@@ -210,6 +210,7 @@ const BOARDS = {
     {id:"reclamacao",  label:"Em reclamação"},
     {id:"comprou",     label:"Comprou"},
     {id:"posvendas",   label:"Pós vendas"},
+    {id:"cancelados",  label:"Cancelados"},
   ]},
   carrinhos: { label:"Carrinhos abandonados", columns:[
     {id:"carrinhos", label:"Carrinhos"},
@@ -224,7 +225,7 @@ const BOARDS = {
 const COLORS = {
   transporte:"#5f7d9c", reclamacao:"#c1543f", comprou:"#6f8f4e",
   carrinhos:"#8d8378", fup1:"#c99a3f", fup2:"#d1793c", ultimato:"#c0463a",
-  posvendas:"#4f8f8a",
+  posvendas:"#4f8f8a", cancelados:"#7a7168",
 };
 // De-para por board: status da planilha -> coluna.
 const BOARD_STATUS_MAP = {
@@ -239,6 +240,11 @@ const BOARD_STATUS_MAP = {
   carrinhos: {},
 };
 const BOARD_DEFAULT_COL = { pedidos:"comprou", carrinhos:"carrinhos" };
+// Dedup de cancelados: se o cliente virou comprador (tem pedido em transporte
+// ou pagamento aprovado), os pedidos "Cancelado" dele são desconsiderados no
+// import — ele já é cliente, só que em outro momento.
+const SUCCESS_STATUSES = ["Em transporte", "Pagamento aprovado"];
+const CANCELLED_STATUS = "Cancelado";
 const STORE_KEY = "boardPedidos_v1";
 
 // ---------- Estado ----------
@@ -550,6 +556,20 @@ function importWorkbook(arrayBuffer, board){
     if(!id || !(r.cliente||"").toString().trim()) continue;
     (groups[id] = groups[id] || []).push(r);
   }
+  // Identidade do cliente: CPF (document) -> telefone -> e-mail. Serve pra
+  // reconhecer a mesma pessoa entre pedidos diferentes.
+  const clientKey = r => {
+    const doc = onlyDigits(r.cliente_document);   if(doc)  return "d:"+doc;
+    const tel = onlyDigits(r.cliente_telefone);   if(tel)  return "t:"+tel;
+    const mail = String(r.cliente_email||"").trim().toLowerCase();
+    return mail ? "e:"+mail : null;
+  };
+  // Clientes que viraram compradores (algum pedido em transporte/aprovado).
+  const buyers = new Set();
+  for(const id in groups){
+    const st = String(groups[id][0].status||"").trim();
+    if(SUCCESS_STATUSES.includes(st)){ const k = clientKey(groups[id][0]); if(k) buyers.add(k); }
+  }
   const newSheet = {};
   for(const id in groups){
     const g = groups[id];
@@ -560,13 +580,19 @@ function importWorkbook(arrayBuffer, board){
       return (q && q!=="1" ? q+"x " : "") + p;
     }).filter(Boolean);
     const status = String(first.status||"").trim();
+    let column = map[status] || defCol;
+    // Cancelado de quem já comprou depois: card vai pra coluna "Cancelados".
+    if(status===CANCELLED_STATUS){
+      const k = clientKey(first);
+      if(k && buyers.has(k)) column = "cancelados";
+    }
     newSheet[id] = {
       id,
       nome: String(first.cliente||"").trim(),
       telefone: String(first.cliente_telefone||"").trim(),
       data: String(first.data||"").trim(),
       produtos,
-      column: map[status] || defCol,
+      column,
     };
   }
   state.sheets[board] = newSheet;
