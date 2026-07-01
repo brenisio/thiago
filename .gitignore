@@ -1,0 +1,8 @@
+# Planilhas com dados de clientes (PII) — NÃO versionar
+*.xlsx
+*.xls
+*.csv
+
+# Artefatos de teste / temporários
+.playwright-mcp/
+*.png

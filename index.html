@@ -1,0 +1,610 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pedidos · Board</title>
+<script src="xlsx.full.min.js"></script>
+<style>
+  :root{
+    /* ground & material — mundo da camurça/couro */
+    --espresso:#241c17;
+    --paper:#f8f3ec;         /* coluna */
+    --card:#fffdf9;          /* card */
+    --ink:#3a2e25;
+    --ink-soft:#6b5b4d;
+    --muted:#9d8b7b;
+    --hair:#e7ddd0;
+    --caramel:#c88a3f;       /* acento da marca */
+    --caramel-dk:#a96f2c;
+    /* semânticas de etapa (separadas do acento) */
+    --ok:#6f8f4e; --danger:#c1543f;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;color:var(--ink);
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    background:
+      radial-gradient(900px 460px at 10% -12%, rgba(200,138,63,.18) 0%, transparent 60%),
+      linear-gradient(158deg,#2b211b 0%,#241c17 58%,#1c1611 100%);
+    background-attachment:fixed;
+  }
+  ::selection{background:rgba(200,138,63,.32)}
+
+  /* ---------- header ---------- */
+  header{
+    display:flex;align-items:center;gap:20px;padding:13px 22px;flex-wrap:wrap;
+    background:rgba(24,18,14,.62);backdrop-filter:blur(10px);
+    position:sticky;top:0;z-index:5;border-bottom:1px solid rgba(255,255,255,.07);
+  }
+  .brand{display:flex;align-items:center;gap:10px;color:#f2e7d8}
+  .brand .g{font-size:20px;filter:saturate(.9)}
+  .brand b{font-size:14px;font-weight:800;letter-spacing:2.5px;text-transform:uppercase}
+  .brand small{display:block;font-size:10px;letter-spacing:2px;color:var(--caramel);font-weight:700;margin-top:-2px}
+  .tabs{display:flex;gap:4px;background:rgba(255,255,255,.06);padding:4px;border-radius:12px;border:1px solid rgba(255,255,255,.06)}
+  .tab{border:0;background:transparent;color:#d8c9b8;padding:8px 16px;border-radius:9px;cursor:pointer;font-size:13.5px;font-weight:700;transition:.16s;letter-spacing:.2px}
+  .tab:hover{background:rgba(255,255,255,.07);color:#fff}
+  .tab.active{background:var(--paper);color:var(--ink);box-shadow:0 3px 10px rgba(0,0,0,.28)}
+  .spacer{flex:1}
+  .updated{color:#b7a693;font-size:12px;letter-spacing:.2px}
+  .btn{border:0;border-radius:10px;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:800;transition:.16s;letter-spacing:.2px}
+  .btn:focus-visible{outline:2px solid var(--caramel);outline-offset:2px}
+  .btn-primary{background:linear-gradient(180deg,var(--caramel),var(--caramel-dk));color:#2a1e12;box-shadow:0 4px 14px rgba(168,111,44,.4)}
+  .btn-primary:hover{transform:translateY(-1px);box-shadow:0 7px 20px rgba(168,111,44,.5)}
+  .btn-ghost{background:rgba(255,255,255,.1);color:#f0e3d3;border:1px solid rgba(255,255,255,.12)}
+  .btn-ghost:hover{background:rgba(255,255,255,.17);transform:translateY(-1px)}
+
+  /* ---------- board ---------- */
+  .board{display:flex;gap:18px;padding:22px;align-items:flex-start;overflow-x:auto;min-height:calc(100vh - 64px)}
+  .board::-webkit-scrollbar{height:11px}
+  .board::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:9px}
+  .board::-webkit-scrollbar-track{background:transparent}
+
+  .col{
+    --c:#8d8378;
+    background:var(--paper);border-radius:16px;width:306px;min-width:306px;
+    display:flex;flex-direction:column;max-height:calc(100vh - 110px);
+    box-shadow:0 14px 34px rgba(10,6,3,.34);overflow:hidden;
+    border:1px solid rgba(0,0,0,.04);
+  }
+  .col-head{
+    display:flex;align-items:center;gap:10px;padding:14px 15px 12px;
+    border-top:4px solid var(--c);
+    background:color-mix(in srgb, var(--c) 9%, var(--paper));
+  }
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--c);flex:none;
+       box-shadow:0 0 0 4px color-mix(in srgb,var(--c) 20%,transparent)}
+  .col-title{flex:1;font-weight:800;font-size:12.5px;letter-spacing:1px;text-transform:uppercase;color:var(--ink)}
+  .count{background:color-mix(in srgb,var(--c) 16%,#fff);color:color-mix(in srgb,var(--c) 72%,#000);
+         border-radius:20px;padding:2px 10px;font-size:12px;font-weight:800;font-variant-numeric:tabular-nums}
+  .cards{padding:8px 10px 4px;overflow-y:auto;display:flex;flex-direction:column;gap:9px}
+  .cards::-webkit-scrollbar{width:9px}
+  .cards::-webkit-scrollbar-thumb{background:rgba(120,90,60,.28);border-radius:9px}
+  .cards::-webkit-scrollbar-track{background:transparent}
+  .cards.drag-over{background:color-mix(in srgb,var(--c) 12%,transparent);border-radius:10px}
+
+  .card{
+    --c:#8d8378;
+    background:var(--card);border-radius:11px;padding:12px 13px 12px 15px;
+    box-shadow:0 1px 2px rgba(58,46,37,.14);cursor:grab;position:relative;
+    border:1px solid var(--hair);border-left:4px solid var(--c);
+    transition:transform .13s ease,box-shadow .13s ease,border-color .13s ease;
+    display:flex;align-items:center;
+  }
+  .card:hover{transform:translateY(-2px);box-shadow:0 8px 18px rgba(58,46,37,.2);border-color:color-mix(in srgb,var(--c) 45%,var(--hair))}
+  .card:active{cursor:grabbing;transform:translateY(0)}
+  .card:focus-visible{outline:2px solid var(--caramel);outline-offset:2px}
+  .card .name{font-size:14px;font-weight:650;color:var(--ink);line-height:1.3;flex:1;padding-right:6px}
+  .card .tag{font-size:9px;font-weight:800;color:var(--muted);background:#f0e9df;
+             border-radius:20px;padding:2px 8px;letter-spacing:.5px;text-transform:uppercase;flex:none}
+  .add{margin:5px 10px 12px;background:transparent;border:1px dashed transparent;color:var(--muted);
+       text-align:left;padding:9px 11px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700;transition:.16s}
+  .add:hover{background:#efe7db;color:var(--ink);border-color:var(--hair)}
+  .empty{color:#b3a595;font-size:13px;padding:12px;font-style:italic;text-align:center}
+
+  /* ---------- modal ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(20,14,10,.62);backdrop-filter:blur(4px);
+           display:none;align-items:flex-start;justify-content:center;z-index:20;padding:52px 16px;overflow:auto}
+  .overlay.open{display:flex}
+  .modal{--mc:var(--caramel);background:var(--card);border-radius:18px;width:100%;max-width:472px;
+         box-shadow:0 30px 70px rgba(0,0,0,.5);overflow:hidden;border-top:6px solid var(--mc);
+         animation:pop .18s ease-out}
+  @keyframes pop{from{transform:translateY(10px) scale(.98);opacity:0}to{transform:none;opacity:1}}
+  @media (prefers-reduced-motion:reduce){.modal{animation:none}.card,.btn,.tab{transition:none}}
+  .modal-body{padding:24px 26px}
+  .modal h2{margin:0 0 4px;font-size:21px;font-weight:800;letter-spacing:-.3px;text-wrap:balance}
+  .modal .sub{color:var(--muted);font-size:11.5px;margin-bottom:20px;font-weight:700;letter-spacing:.6px;text-transform:uppercase}
+  .field{margin-bottom:15px}
+  .field>label{display:block;font-size:10.5px;font-weight:800;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.8px}
+  .field input,.field textarea,.field select{width:100%;padding:10px 12px;border:1px solid var(--hair);border-radius:9px;
+       font-size:14px;font-family:inherit;color:var(--ink);background:#fffefb;transition:.15s}
+  .field input:focus,.field textarea:focus,.field select:focus{outline:0;border-color:var(--caramel);box-shadow:0 0 0 3px rgba(200,138,63,.16)}
+  .field textarea{min-height:76px;resize:vertical}
+  .prodlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+  .prodlist li{background:#f4ede2;border-left:3px solid var(--mc);border-radius:8px;padding:9px 12px;font-size:13.5px;color:var(--ink-soft)}
+  .row{display:flex;gap:12px;align-items:center}
+  #vPhone{font-size:15px;font-weight:650;color:var(--ink);font-variant-numeric:tabular-nums}
+  .wa{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:#25d366;color:#fff;
+      padding:7px 13px;border-radius:9px;font-size:13px;font-weight:800;transition:.15s}
+  .wa:hover{filter:brightness(1.05);transform:translateY(-1px)}
+  #vDate{font-size:14px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+  .modal-actions{display:flex;gap:9px;justify-content:flex-end;margin-top:22px;flex-wrap:wrap}
+  .modal-actions .left{margin-right:auto}
+  .btn-danger{background:var(--danger);color:#fff}
+  .btn-ok{background:var(--ok);color:#fff}
+  .btn-line{background:#fff;border:1px solid var(--hair);color:var(--ink)}
+  .btn-danger:hover,.btn-ok:hover,.btn-line:hover{transform:translateY(-1px)}
+  .pick{--pc:#8d8378;background:var(--paper);border:1px solid var(--hair);border-left:5px solid var(--pc);
+        color:var(--ink);text-align:left;padding:15px 16px;font-size:15px;display:flex;align-items:center;gap:10px}
+  .pick:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(58,46,37,.16);
+        border-color:color-mix(in srgb,var(--pc) 45%,var(--hair))}
+  .hidden{display:none!important}
+</style>
+
+<header>
+  <div class="brand"><span class="g">👢</span><span><b>Pedidos</b><small>BOARD</small></span></div>
+  <div class="tabs" id="tabs"></div>
+  <span class="spacer"></span>
+  <span class="updated" id="updated"></span>
+  <button class="btn btn-ghost" id="btnSort" title="Ordenar por data da compra">↓ Mais novos</button>
+  <button class="btn btn-primary" id="btnUpdate">Atualizar planilha</button>
+  <input type="file" id="file" accept=".xlsx,.xls" class="hidden">
+</header>
+
+<div class="board" id="board"></div>
+
+<!-- Detail / Edit modal -->
+<div class="overlay" id="overlay">
+  <div class="modal"><div class="modal-body">
+    <!-- VIEW -->
+    <div id="view">
+      <h2 id="vName"></h2>
+      <div class="sub" id="vCol"></div>
+      <div class="field"><label>Produtos</label><ul class="prodlist" id="vProds"></ul></div>
+      <div class="field"><label>Telefone</label>
+        <div class="row"><span id="vPhone"></span> <a class="wa" id="vWa" target="_blank" rel="noopener">💬 WhatsApp</a></div>
+      </div>
+      <div class="field"><label>Data da compra</label><div id="vDate"></div></div>
+      <div class="modal-actions">
+        <button class="btn btn-danger left" id="btnDelete">Excluir</button>
+        <button class="btn btn-line" id="btnCloseView">Fechar</button>
+        <button class="btn btn-ok" id="btnEdit">Editar</button>
+      </div>
+    </div>
+    <!-- EDIT / ADD -->
+    <div id="edit" class="hidden">
+      <h2 id="eTitle">Editar card</h2>
+      <div class="sub" id="eSub"></div>
+      <div class="field"><label>Nome</label><input id="eName" placeholder="Nome do cliente"></div>
+      <div class="field"><label>Telefone</label><input id="ePhone" placeholder="Ex: 31975574197"></div>
+      <div class="field"><label>Data da compra</label><input id="eDate" placeholder="dd/mm/aaaa"></div>
+      <div class="field"><label>Produtos (um por linha)</label><textarea id="eProds" placeholder="Bota Cano Médio..."></textarea></div>
+      <div class="field"><label>Coluna</label><select id="eCol"></select></div>
+      <div class="modal-actions">
+        <button class="btn btn-line" id="btnCancelEdit">Cancelar</button>
+        <button class="btn btn-ok" id="btnSave">Salvar</button>
+      </div>
+    </div>
+  </div></div>
+</div>
+
+<!-- Seletor de board na importação -->
+<div class="overlay" id="chooser">
+  <div class="modal" style="max-width:412px;border-top-color:var(--caramel)"><div class="modal-body">
+    <h2>Atualizar planilha</h2>
+    <div class="sub">Importar os dados para qual board?</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <label class="btn pick" for="file" data-board="pedidos" style="--pc:#5f7d9c">📦 &nbsp;Pedidos</label>
+      <label class="btn pick" for="file" data-board="carrinhos" style="--pc:#c99a3f">🛒 &nbsp;Carrinhos abandonados</label>
+    </div>
+    <div class="modal-actions"><button class="btn btn-line" id="chooserCancel">Cancelar</button></div>
+  </div></div>
+</div>
+
+<script>
+"use strict";
+
+// ---------- Definições ----------
+const BOARDS = {
+  pedidos: { label:"Pedidos", columns:[
+    {id:"transporte",  label:"Transporte"},
+    {id:"reclamacao",  label:"Em reclamação"},
+    {id:"comprou",     label:"Comprou"},
+    {id:"posvendas",   label:"Pós vendas"},
+  ]},
+  carrinhos: { label:"Carrinhos abandonados", columns:[
+    {id:"carrinhos", label:"Carrinhos"},
+    {id:"fup1",      label:"Fup 1"},
+    {id:"fup2",      label:"Fup 2"},
+    {id:"ultimato",  label:"Ultimato"},
+    {id:"posvendas", label:"Pós vendas"},
+  ]},
+};
+// Cor de cada etapa. Pedidos: azul=movimento, tijolo=problema, oliva=concluído.
+// Carrinhos: funil de urgência crescente (taupe -> ouro -> laranja -> tijolo).
+const COLORS = {
+  transporte:"#5f7d9c", reclamacao:"#c1543f", comprou:"#6f8f4e",
+  carrinhos:"#8d8378", fup1:"#c99a3f", fup2:"#d1793c", ultimato:"#c0463a",
+  posvendas:"#4f8f8a",
+};
+// De-para por board: status da planilha -> coluna.
+const BOARD_STATUS_MAP = {
+  pedidos: {
+    "Em transporte":       "transporte",
+    "Pagamento aprovado":  "comprou",
+    "Cancelado":           "reclamacao",
+    "Aguardando pagamento":"comprou",
+  },
+  // Carrinhos: de-para será definido quando você mandar a planilha exemplo.
+  // Por enquanto todos os cards entram em "Carrinhos" e você move o resto à mão.
+  carrinhos: {},
+};
+const BOARD_DEFAULT_COL = { pedidos:"comprou", carrinhos:"carrinhos" };
+const STORE_KEY = "boardPedidos_v1";
+
+// ---------- Estado ----------
+// Cada board tem sua própria planilha e seus overrides:
+//   sheets[board]  : { [id]: {id,nome,telefone,data,produtos:[],column} }  base da planilha
+//   moves[board]   : { [id]: colId }         movimentações manuais
+//   edits[board]   : { [id]: {campos...} }   edições manuais
+//   deleted[board] : [id]                    cards da planilha excluídos à mão
+//   manual         : [ {id,board,column,...} ]  cards criados à mão (guardam o board)
+//   updated[board] : string                  data da última importação
+let state = loadState();
+let activeBoard = "pedidos";
+let pendingImportBoard = "pedidos";
+
+function defaults(){ return {
+  sheets:{pedidos:{},carrinhos:{}}, moves:{pedidos:{},carrinhos:{}},
+  edits:{pedidos:{},carrinhos:{}}, deleted:{pedidos:[],carrinhos:[]},
+  manual:[], updated:{pedidos:null,carrinhos:null}, sort:"newest",
+};}
+function loadState(){
+  let s=null;
+  try{ s=JSON.parse(localStorage.getItem(STORE_KEY)); }catch(e){}
+  if(!s || typeof s!=="object") return defaults();
+  if(s.sheet && !s.sheets){ // migra formato antigo (board única = pedidos)
+    s.sheets ={pedidos:s.sheet||{},carrinhos:{}};
+    s.moves  ={pedidos:s.moves||{},carrinhos:{}};
+    s.edits  ={pedidos:s.edits||{},carrinhos:{}};
+    s.deleted={pedidos:Array.isArray(s.deleted)?s.deleted:[],carrinhos:[]};
+    s.updated={pedidos:s.updatedAt||null,carrinhos:null};
+    delete s.sheet; delete s.updatedAt;
+  }
+  s = Object.assign(defaults(), s);
+  for(const b in BOARDS){                 // garante todas as sub-chaves por board
+    if(!s.sheets[b])  s.sheets[b]={};
+    if(!s.moves[b])   s.moves[b]={};
+    if(!s.edits[b])   s.edits[b]={};
+    if(!s.deleted[b]) s.deleted[b]=[];
+    if(!(b in s.updated)) s.updated[b]=null;
+  }
+  if(!Array.isArray(s.manual)) s.manual=[];
+  if(s.sort!=="oldest" && s.sort!=="newest") s.sort="newest";
+  return s;
+}
+function saveState(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+
+// ---------- Utilidades ----------
+function onlyDigits(s){ return String(s||"").replace(/\D/g,""); }
+function waLink(phone){
+  let d = onlyDigits(phone);
+  if(!d) return null;
+  if(d.length===10 || d.length===11) d = "55"+d;   // DDI Brasil
+  return "https://wa.me/"+d;
+}
+function fmtPhone(phone){
+  const d = onlyDigits(phone);
+  if(d.length===11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
+  if(d.length===10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
+  return phone||"—";
+}
+function esc(s){ return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+function uid(){ return "m"+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function colorOf(colId){ return COLORS[colId] || "#8d8378"; }
+// "dd/mm/aaaa hh:mm:ss" -> timestamp (null se não der pra ler)
+function parseData(s){
+  const m = String(s||"").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if(!m) return null;
+  return new Date(+m[3], +m[2]-1, +m[1], +m[4]||0, +m[5]||0, +m[6]||0).getTime();
+}
+// ordena cards por data; sem data sempre vai pro fim
+function sortCards(list){
+  const dir = state.sort==="oldest" ? 1 : -1;
+  return list.sort((a,b)=>{
+    const ta=parseData(a.data), tb=parseData(b.data);
+    if(ta===null && tb===null) return 0;
+    if(ta===null) return 1;
+    if(tb===null) return -1;
+    return (ta-tb)*dir;
+  });
+}
+
+// ---------- Montagem dos cards visíveis ----------
+function cardsForBoard(boardId){
+  const out = [];
+  const sh  = state.sheets[boardId]  || {};
+  const mv  = state.moves[boardId]   || {};
+  const eds = state.edits[boardId]   || {};
+  const del = state.deleted[boardId] || [];
+  const defCol = BOARD_DEFAULT_COL[boardId];
+  for(const id in sh){
+    if(del.includes(id)) continue;
+    const base = sh[id];
+    const ed = eds[id] || {};
+    out.push({
+      id, source:"sheet", board:boardId,
+      column: mv[id] || base.column || defCol,
+      nome: ed.nome ?? base.nome,
+      telefone: ed.telefone ?? base.telefone,
+      data: ed.data ?? base.data,
+      produtos: ed.produtos ?? base.produtos ?? [],
+    });
+  }
+  for(const m of state.manual){
+    if(m.board===boardId) out.push(Object.assign({source:"manual"}, m));
+  }
+  return out;
+}
+
+// ---------- Render ----------
+function renderTabs(){
+  const t = document.getElementById("tabs");
+  t.innerHTML = "";
+  for(const bid in BOARDS){
+    const b = document.createElement("button");
+    b.className = "tab"+(bid===activeBoard?" active":"");
+    b.textContent = BOARDS[bid].label;
+    b.onclick = ()=>{ activeBoard=bid; render(); };
+    t.appendChild(b);
+  }
+}
+function renderBoard(){
+  const wrap = document.getElementById("board");
+  wrap.innerHTML = "";
+  const cards = cardsForBoard(activeBoard);
+  for(const col of BOARDS[activeBoard].columns){
+    const color = colorOf(col.id);
+    const list = sortCards(cards.filter(c=>c.column===col.id));
+    const colEl = document.createElement("div");
+    colEl.className = "col";
+    colEl.style.setProperty("--c", color);
+    colEl.innerHTML =
+      `<div class="col-head"><span class="dot"></span><span class="col-title">${esc(col.label)}</span><span class="count">${list.length}</span></div>`;
+    const cardsEl = document.createElement("div");
+    cardsEl.className = "cards";
+    cardsEl.dataset.col = col.id;
+    cardsEl.addEventListener("dragover", e=>{ e.preventDefault(); cardsEl.classList.add("drag-over"); });
+    cardsEl.addEventListener("dragleave", ()=> cardsEl.classList.remove("drag-over"));
+    cardsEl.addEventListener("drop", e=>{
+      e.preventDefault(); cardsEl.classList.remove("drag-over");
+      const cid = e.dataTransfer.getData("text/plain");
+      moveCard(cid, col.id);
+    });
+    if(list.length===0){
+      const em = document.createElement("div"); em.className="empty"; em.textContent="Sem cards"; cardsEl.appendChild(em);
+    }
+    for(const c of list){
+      const el = document.createElement("div");
+      el.className = "card"+(c.source==="manual"?" manual":"");
+      el.style.setProperty("--c", color);
+      el.tabIndex = 0;
+      el.innerHTML = `<span class="name"></span>${c.source==="manual"?'<span class="tag">manual</span>':''}`;
+      el.querySelector(".name").textContent = c.nome || "(sem nome)";
+      el.draggable = true;
+      el.addEventListener("dragstart", e=> e.dataTransfer.setData("text/plain", c.id));
+      el.onclick = ()=> openView(c.id);
+      el.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openView(c.id);} });
+      cardsEl.appendChild(el);
+    }
+    colEl.appendChild(cardsEl);
+    const add = document.createElement("button");
+    add.className="add"; add.textContent="➕ Adicionar card";
+    add.onclick = ()=> openAdd(activeBoard, col.id);
+    colEl.appendChild(add);
+    wrap.appendChild(colEl);
+  }
+}
+function renderUpdated(){
+  const u = state.updated[activeBoard];
+  document.getElementById("updated").textContent =
+    u ? ("Atualizado "+u) : "Sem planilha nesta board — clique em Atualizar";
+}
+function renderSort(){
+  document.getElementById("btnSort").textContent =
+    state.sort==="oldest" ? "↑ Mais antigos" : "↓ Mais novos";
+}
+function render(){ renderTabs(); renderBoard(); renderUpdated(); renderSort(); }
+
+// ---------- Localizar card ----------
+function findCard(cid){
+  return cardsForBoard(activeBoard).find(c=>c.id===cid)
+      || cardsForBoard(activeBoard==="pedidos"?"carrinhos":"pedidos").find(c=>c.id===cid);
+}
+
+// ---------- Mover ----------
+function moveCard(cid, colId){
+  const c = findCard(cid); if(!c) return;
+  if(c.source==="sheet"){
+    if(!state.moves[c.board]) state.moves[c.board]={};
+    state.moves[c.board][cid]=colId;
+  } else {
+    const m = state.manual.find(x=>x.id===cid); if(m) m.column=colId;
+  }
+  saveState(); render();
+}
+
+// ---------- Modal ----------
+const overlay = document.getElementById("overlay");
+let editing = null;
+
+function setModalColor(colId){ document.querySelector(".modal").style.setProperty("--mc", colorOf(colId)); }
+function closeModal(){ overlay.classList.remove("open"); editing=null; }
+overlay.addEventListener("click", e=>{ if(e.target===overlay) closeModal(); });
+
+function openView(cid){
+  const c = findCard(cid); if(!c) return;
+  editing = {mode:"edit", id:c.id, board:c.board, column:c.column, source:c.source};
+  setModalColor(c.column);
+  document.getElementById("view").classList.remove("hidden");
+  document.getElementById("edit").classList.add("hidden");
+  document.getElementById("vName").textContent = c.nome || "(sem nome)";
+  const colLabel = (BOARDS[c.board].columns.find(x=>x.id===c.column)||{}).label || c.column;
+  document.getElementById("vCol").textContent = BOARDS[c.board].label+" · "+colLabel+(c.source==="manual"?" · card manual":"");
+  const ul = document.getElementById("vProds"); ul.innerHTML="";
+  const prods = c.produtos||[];
+  if(prods.length===0){ ul.innerHTML = `<li style="color:#b3a595;border-left-color:#d8ccbd">—</li>`; }
+  else prods.forEach(p=>{ const li=document.createElement("li"); li.textContent=p; ul.appendChild(li); });
+  document.getElementById("vPhone").textContent = fmtPhone(c.telefone);
+  const wa = waLink(c.telefone); const waEl = document.getElementById("vWa");
+  if(wa){ waEl.href=wa; waEl.style.display=""; } else waEl.style.display="none";
+  document.getElementById("vDate").textContent = c.data || "—";
+  overlay.classList.add("open");
+}
+
+function fillColSelect(boardId, colId){
+  const sel = document.getElementById("eCol"); sel.innerHTML="";
+  for(const col of BOARDS[boardId].columns){
+    const o=document.createElement("option"); o.value=col.id; o.textContent=col.label;
+    if(col.id===colId) o.selected=true; sel.appendChild(o);
+  }
+}
+function openEdit(){
+  const c = findCard(editing.id); if(!c) return;
+  document.getElementById("view").classList.add("hidden");
+  document.getElementById("edit").classList.remove("hidden");
+  document.getElementById("eTitle").textContent = "Editar card";
+  document.getElementById("eSub").textContent = c.source==="sheet" ? "Pedido da planilha — edições ficam salvas por cima" : "Card manual";
+  document.getElementById("eName").value = c.nome||"";
+  document.getElementById("ePhone").value = c.telefone||"";
+  document.getElementById("eDate").value = c.data||"";
+  document.getElementById("eProds").value = (c.produtos||[]).join("\n");
+  fillColSelect(c.board, c.column);
+}
+function openAdd(boardId, colId){
+  editing = {mode:"add", id:null, board:boardId, column:colId, source:"manual"};
+  setModalColor(colId);
+  document.getElementById("view").classList.add("hidden");
+  document.getElementById("edit").classList.remove("hidden");
+  document.getElementById("eTitle").textContent = "Novo card";
+  document.getElementById("eSub").textContent = BOARDS[boardId].label;
+  document.getElementById("eName").value="";
+  document.getElementById("ePhone").value="";
+  document.getElementById("eDate").value="";
+  document.getElementById("eProds").value="";
+  fillColSelect(boardId, colId);
+  overlay.classList.add("open");
+}
+function saveEdit(){
+  const nome = document.getElementById("eName").value.trim();
+  const telefone = document.getElementById("ePhone").value.trim();
+  const data = document.getElementById("eDate").value.trim();
+  const produtos = document.getElementById("eProds").value.split("\n").map(s=>s.trim()).filter(Boolean);
+  const column = document.getElementById("eCol").value;
+  if(editing.mode==="add"){
+    state.manual.push({id:uid(), board:editing.board, column, nome, telefone, data, produtos});
+  } else {
+    const c = findCard(editing.id);
+    if(c && c.source==="sheet"){
+      if(!state.edits[c.board]) state.edits[c.board]={};
+      state.edits[c.board][editing.id] = {nome, telefone, data, produtos};
+      if(column){ if(!state.moves[c.board]) state.moves[c.board]={}; state.moves[c.board][editing.id]=column; }
+    } else if(c){
+      const m = state.manual.find(x=>x.id===editing.id);
+      if(m) Object.assign(m, {nome, telefone, data, produtos, column});
+    }
+  }
+  saveState(); closeModal(); render();
+}
+function deleteCard(){
+  const c = findCard(editing.id); if(!c) return;
+  if(!confirm("Excluir este card?")) return;
+  if(c.source==="sheet"){
+    if(!state.deleted[c.board]) state.deleted[c.board]=[];
+    if(!state.deleted[c.board].includes(c.id)) state.deleted[c.board].push(c.id);
+  } else { state.manual = state.manual.filter(x=>x.id!==c.id); }
+  saveState(); closeModal(); render();
+}
+
+// ---------- Importar planilha ----------
+document.getElementById("file").addEventListener("change", function(){
+  const f = this.files[0]; if(!f) return;
+  const reader = new FileReader();
+  reader.onload = e=>{
+    try{ importWorkbook(e.target.result, pendingImportBoard); }
+    catch(err){ alert("Erro ao ler a planilha: "+err.message); }
+    document.getElementById("file").value="";
+    closeChooser();
+  };
+  reader.readAsArrayBuffer(f);
+});
+
+function importWorkbook(arrayBuffer, board){
+  const map = BOARD_STATUS_MAP[board] || {};
+  const defCol = BOARD_DEFAULT_COL[board];
+  const wb = XLSX.read(arrayBuffer, {type:"array"});
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, {defval:""});
+  const groups = {};
+  for(const r of rows){
+    const id = String(r.id || r.numero_pedido || "").trim();
+    if(!id || !(r.cliente||"").toString().trim()) continue;
+    (groups[id] = groups[id] || []).push(r);
+  }
+  const newSheet = {};
+  for(const id in groups){
+    const g = groups[id];
+    const first = g[0];
+    const produtos = g.map(r=>{
+      const q = String(r.quantidade||"").trim();
+      const p = String(r.produto||"").trim();
+      return (q && q!=="1" ? q+"x " : "") + p;
+    }).filter(Boolean);
+    const status = String(first.status||"").trim();
+    newSheet[id] = {
+      id,
+      nome: String(first.cliente||"").trim(),
+      telefone: String(first.cliente_telefone||"").trim(),
+      data: String(first.data||"").trim(),
+      produtos,
+      column: map[status] || defCol,
+    };
+  }
+  state.sheets[board] = newSheet;
+  // reconciliação por board: planilha é fonte de verdade da existência.
+  const alive = id=> Object.prototype.hasOwnProperty.call(newSheet, id);
+  const mv = state.moves[board] || (state.moves[board]={}); for(const k in mv) if(!alive(k)) delete mv[k];
+  const ed = state.edits[board] || (state.edits[board]={}); for(const k in ed) if(!alive(k)) delete ed[k];
+  state.deleted[board] = (state.deleted[board]||[]).filter(alive);
+  state.updated[board] = new Date().toLocaleString("pt-BR");
+  saveState();
+  activeBoard = board;
+  render();
+  alert("Planilha importada: "+Object.keys(newSheet).length+" cards em “"+BOARDS[board].label+"”.");
+}
+
+// ---------- Ligações ----------
+const chooser = document.getElementById("chooser");
+function closeChooser(){ chooser.classList.remove("open"); }
+document.getElementById("btnUpdate").onclick = ()=> chooser.classList.add("open");
+document.getElementById("chooserCancel").onclick = closeChooser;
+chooser.addEventListener("click", e=>{ if(e.target===chooser) closeChooser(); });
+// Cada opção é um <label for="file">: define o board de destino e o próprio
+// label abre o seletor de arquivo nativo (confiável em file://). Não fechamos
+// o chooser aqui — ele é fechado ao concluir a importação.
+document.querySelectorAll(".pick").forEach(b=> b.addEventListener("click", ()=>{
+  pendingImportBoard = b.dataset.board;
+}));
+
+document.getElementById("btnSort").onclick = ()=>{
+  state.sort = state.sort==="oldest" ? "newest" : "oldest";
+  saveState(); render();
+};
+document.getElementById("btnCloseView").onclick = closeModal;
+document.getElementById("btnEdit").onclick = openEdit;
+document.getElementById("btnCancelEdit").onclick = ()=>{ if(editing && editing.mode==="add") closeModal(); else openView(editing.id); };
+document.getElementById("btnSave").onclick = saveEdit;
+document.getElementById("btnDelete").onclick = deleteCard;
+document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ closeModal(); closeChooser(); } });
+
+render();
+</script>
