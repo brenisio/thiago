@@ -1,0 +1,32 @@
+========================================
+  BOARD NULLA — como usar (Windows)
+========================================
+
+COMO ABRIR
+----------
+1. Deixe TODOS os arquivos desta pasta juntos (nao separe).
+2. De um duplo-clique em  Board.bat
+3. Na primeira vez o Windows pode mostrar "O Windows protegeu o seu PC".
+   Clique em "Mais informacoes" e depois "Executar assim mesmo".
+   (Isso acontece so na 1a vez, com qualquer programa nao instalado.)
+4. Abre uma janelinha preta (o servidor) e o navegador com o Board.
+   -> MANTENHA a janelinha preta aberta enquanto usa. Fechar ela = fechar o Board.
+
+USANDO
+------
+- "Atualizar planilha": escolha o board (Pedidos ou Carrinhos) e selecione
+  o arquivo .xlsx exportado da plataforma.
+- Cards, edicoes, mover de coluna e cards criados a mao ficam salvos
+  automaticamente. Pode fechar e reabrir que continua tudo la.
+
+SEUS DADOS
+----------
+- Tudo fica salvo no arquivo  banco.json  (criado sozinho nesta pasta).
+- Esse arquivo E o seu backup. Se quiser guardar copia ou levar pra outro
+  computador, e so copiar o banco.json junto.
+
+PROBLEMAS
+---------
+- Se disser que a porta esta ocupada: o Board provavelmente ja esta aberto
+  em outra janela. Feche a janelinha preta antiga e abra de novo.
+- Qualquer outra coisa, chame o suporte.

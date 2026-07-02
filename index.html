@@ -93,6 +93,11 @@
   .card:hover{transform:translateY(-2px);box-shadow:0 8px 18px rgba(58,46,37,.2);border-color:color-mix(in srgb,var(--c) 45%,var(--hair))}
   .card:active{cursor:grabbing;transform:translateY(0)}
   .card:focus-visible{outline:2px solid var(--caramel);outline-offset:2px}
+  /* card "novo" (entrou na última importação): fundo na cor da coluna, bem claro */
+  .card.novo{
+    background:color-mix(in srgb, var(--c) 16%, var(--card));
+    border-color:color-mix(in srgb, var(--c) 40%, var(--hair));
+  }
   .card .name{font-size:14px;font-weight:650;color:var(--ink);line-height:1.3;flex:1;padding-right:6px}
   .card .tag{font-size:9px;font-weight:800;color:var(--muted);background:#f0e9df;
              border-radius:20px;padding:2px 8px;letter-spacing:.5px;text-transform:uppercase;flex:none}
@@ -127,6 +132,7 @@
       padding:7px 13px;border-radius:9px;font-size:13px;font-weight:800;transition:.15s}
   .wa:hover{filter:brightness(1.05);transform:translateY(-1px)}
   #vDate{font-size:14px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+  #vStage{font-size:15px;font-weight:650;color:var(--ink)}
   .modal-actions{display:flex;gap:9px;justify-content:flex-end;margin-top:22px;flex-wrap:wrap}
   .modal-actions .left{margin-right:auto}
   .btn-danger{background:var(--danger);color:#fff}
@@ -159,6 +165,7 @@
     <div id="view">
       <h2 id="vName"></h2>
       <div class="sub" id="vCol"></div>
+      <div class="field hidden" id="vStageWrap"><label>Etapa</label><div id="vStage"></div></div>
       <div class="field"><label>Produtos</label><ul class="prodlist" id="vProds"></ul></div>
       <div class="field"><label>Telefone</label>
         <div class="row"><span id="vPhone"></span> <a class="wa" id="vWa" target="_blank" rel="noopener">💬 WhatsApp</a></div>
@@ -206,9 +213,8 @@
 // ---------- Definições ----------
 const BOARDS = {
   pedidos: { label:"Pedidos", columns:[
-    {id:"transporte",  label:"Transporte"},
-    {id:"reclamacao",  label:"Em reclamação"},
     {id:"comprou",     label:"Comprou"},
+    {id:"reclamacao",  label:"Em reclamação"},
     {id:"posvendas",   label:"Pós vendas"},
     {id:"cancelados",  label:"Cancelados"},
   ]},
@@ -227,25 +233,61 @@ const COLORS = {
   carrinhos:"#8d8378", fup1:"#c99a3f", fup2:"#d1793c", ultimato:"#c0463a",
   posvendas:"#4f8f8a", cancelados:"#7a7168",
 };
-// De-para por board: status da planilha -> coluna.
+// Status de pedido -> emoji + rótulo. As colunas "Comprou" e "Transporte" foram
+// fundidas em "comprou"; o emoji no card diferencia a etapa sem abrir o card.
+const PEDIDO_STATUS = {
+  "Em transporte":        {emoji:"🚚",  label:"Em transporte"},
+  "Pagamento aprovado":   {emoji:"🛍️", label:"Comprou"},
+  "Aguardando pagamento": {emoji:"⏳",  label:"Aguardando pagamento"},
+};
+// De-para por board: valor do campo "status" da planilha -> coluna.
 const BOARD_STATUS_MAP = {
   pedidos: {
-    "Em transporte":       "transporte",
+    "Em transporte":       "comprou",   // fundido com Comprou; diferenciado por emoji
     "Pagamento aprovado":  "comprou",
     "Cancelado":           "reclamacao",
     "Aguardando pagamento":"comprou",
   },
-  // Carrinhos: de-para será definido quando você mandar a planilha exemplo.
-  // Por enquanto todos os cards entram em "Carrinhos" e você move o resto à mão.
-  carrinhos: {},
+  // Carrinhos: o "status" é o campo `tentativas_recuperação` ("n/4" = quantas
+  // tentativas de recuperação já foram feitas). Vira o funil de follow-up:
+  // 0 tentativa = entrada, mais tentativas = mais fundo. 4/4 (esgotado) = Ultimato.
+  carrinhos: {
+    "0/4": "carrinhos",
+    "1/4": "fup1",
+    "2/4": "fup2",
+    "3/4": "ultimato",
+    "4/4": "ultimato",
+  },
 };
 const BOARD_DEFAULT_COL = { pedidos:"comprou", carrinhos:"carrinhos" };
+// Nomes das colunas na planilha de cada board (as planilhas de origem diferem).
+// `id` é lista (usa o 1º preenchido) e é a chave de agrupamento. Campos com
+// `null` não existem naquela planilha. `quantidade:null` = 1 linha por card e o
+// campo de produto pode trazer vários itens separados por vírgula.
+const BOARD_FIELDS = {
+  pedidos: {
+    id:["id","numero_pedido"],
+    nome:"cliente", telefone:"cliente_telefone", email:"cliente_email",
+    document:"cliente_document", data:"data",
+    produto:"produto", quantidade:"quantidade", status:"status",
+  },
+  carrinhos: {
+    id:["id"],
+    nome:"nome_cliente", telefone:"telefone_cliente", email:"email_cliente",
+    document:null, data:"criado_em",
+    produto:"produtos", quantidade:null, status:"tentativas_recuperação",
+  },
+};
 // Dedup de cancelados: se o cliente virou comprador (tem pedido em transporte
 // ou pagamento aprovado), os pedidos "Cancelado" dele são desconsiderados no
 // import — ele já é cliente, só que em outro momento.
 const SUCCESS_STATUSES = ["Em transporte", "Pagamento aprovado"];
 const CANCELLED_STATUS = "Cancelado";
 const STORE_KEY = "boardPedidos_v1";
+// Persistência: se aberto via servidor (http), o estado é salvo em banco.json
+// pelo servidor (auto-save real). Se aberto direto (file://), cai no localStorage.
+const USE_SERVER = location.protocol === "http:" || location.protocol === "https:";
+const STATE_URL  = "/api/state";
 
 // ---------- Estado ----------
 // Cada board tem sua própria planilha e seus overrides:
@@ -255,7 +297,7 @@ const STORE_KEY = "boardPedidos_v1";
 //   deleted[board] : [id]                    cards da planilha excluídos à mão
 //   manual         : [ {id,board,column,...} ]  cards criados à mão (guardam o board)
 //   updated[board] : string                  data da última importação
-let state = loadState();
+let state = defaults();          // temporário; bootState() carrega o real (server/localStorage)
 let activeBoard = "pedidos";
 let pendingImportBoard = "pedidos";
 
@@ -263,10 +305,11 @@ function defaults(){ return {
   sheets:{pedidos:{},carrinhos:{}}, moves:{pedidos:{},carrinhos:{}},
   edits:{pedidos:{},carrinhos:{}}, deleted:{pedidos:[],carrinhos:[]},
   manual:[], updated:{pedidos:null,carrinhos:null}, sort:"newest",
+  novos:{pedidos:[],carrinhos:[]},
 };}
-function loadState(){
-  let s=null;
-  try{ s=JSON.parse(localStorage.getItem(STORE_KEY)); }catch(e){}
+// Normaliza um estado cru (do localStorage ou do banco.json): migra formato
+// antigo e garante todas as sub-chaves.
+function normalizeState(s){
   if(!s || typeof s!=="object") return defaults();
   if(s.sheet && !s.sheets){ // migra formato antigo (board única = pedidos)
     s.sheets ={pedidos:s.sheet||{},carrinhos:{}};
@@ -277,18 +320,49 @@ function loadState(){
     delete s.sheet; delete s.updatedAt;
   }
   s = Object.assign(defaults(), s);
+  if(!s.novos || typeof s.novos!=="object") s.novos={};
   for(const b in BOARDS){                 // garante todas as sub-chaves por board
     if(!s.sheets[b])  s.sheets[b]={};
     if(!s.moves[b])   s.moves[b]={};
     if(!s.edits[b])   s.edits[b]={};
     if(!s.deleted[b]) s.deleted[b]=[];
+    if(!Array.isArray(s.novos[b])) s.novos[b]=[];
     if(!(b in s.updated)) s.updated[b]=null;
   }
   if(!Array.isArray(s.manual)) s.manual=[];
   if(s.sort!=="oldest" && s.sort!=="newest") s.sort="newest";
+  // migração: a coluna "transporte" foi fundida em "comprou" (Pedidos)
+  for(const id in s.sheets.pedidos){ if(s.sheets.pedidos[id] && s.sheets.pedidos[id].column==="transporte") s.sheets.pedidos[id].column="comprou"; }
+  for(const id in s.moves.pedidos){ if(s.moves.pedidos[id]==="transporte") s.moves.pedidos[id]="comprou"; }
+  for(const m of s.manual){ if(m && m.board==="pedidos" && m.column==="transporte") m.column="comprou"; }
   return s;
 }
-function saveState(){ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+function loadLocal(){
+  let s=null;
+  try{ s=JSON.parse(localStorage.getItem(STORE_KEY)); }catch(e){}
+  return normalizeState(s);
+}
+// Carrega o estado inicial: servidor (banco.json) quando disponível, senão localStorage.
+async function bootState(){
+  if(USE_SERVER){
+    try{
+      const r = await fetch(STATE_URL, {cache:"no-store"});
+      if(r.ok){ return normalizeState(await r.json()); }
+    }catch(e){}
+  }
+  return loadLocal();
+}
+let _saveTimer = null;
+function saveState(){
+  const json = JSON.stringify(state);
+  try{ localStorage.setItem(STORE_KEY, json); }catch(e){}   // cache/fallback local
+  if(USE_SERVER){                                            // auto-save no banco.json
+    clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(()=>{
+      fetch(STATE_URL, {method:"POST", headers:{"Content-Type":"application/json"}, body:json}).catch(()=>{});
+    }, 200);
+  }
+}
 
 // ---------- Utilidades ----------
 function onlyDigits(s){ return String(s||"").replace(/\D/g,""); }
@@ -344,6 +418,8 @@ function cardsForBoard(boardId){
       telefone: ed.telefone ?? base.telefone,
       data: ed.data ?? base.data,
       produtos: ed.produtos ?? base.produtos ?? [],
+      novo: (state.novos[boardId]||[]).includes(id),
+      status: base.status,
     });
   }
   for(const m of state.manual){
@@ -366,11 +442,19 @@ function renderTabs(){
 }
 function renderBoard(){
   const wrap = document.getElementById("board");
+  // Preserva a posição de scroll entre re-renders (ao editar/mover/excluir um
+  // card o board é reconstruído; sem isto o scroll voltaria pro topo).
+  const prevScrollLeft = wrap.scrollLeft;
+  const prevPageY = window.scrollY;
+  const prevColScroll = {};
+  wrap.querySelectorAll(".cards").forEach(el=>{ prevColScroll[el.dataset.col] = el.scrollTop; });
   wrap.innerHTML = "";
   const cards = cardsForBoard(activeBoard);
   for(const col of BOARDS[activeBoard].columns){
     const color = colorOf(col.id);
-    const list = sortCards(cards.filter(c=>c.column===col.id));
+    // cards "novos" (última importação) sobem pro topo; cada grupo ordenado por data
+    const inCol = cards.filter(c=>c.column===col.id);
+    const list = sortCards(inCol.filter(c=>c.novo)).concat(sortCards(inCol.filter(c=>!c.novo)));
     const colEl = document.createElement("div");
     colEl.className = "col";
     colEl.style.setProperty("--c", color);
@@ -391,11 +475,12 @@ function renderBoard(){
     }
     for(const c of list){
       const el = document.createElement("div");
-      el.className = "card"+(c.source==="manual"?" manual":"");
+      el.className = "card"+(c.source==="manual"?" manual":"")+(c.novo?" novo":"");
       el.style.setProperty("--c", color);
       el.tabIndex = 0;
       el.innerHTML = `<span class="name"></span>${c.source==="manual"?'<span class="tag">manual</span>':''}`;
-      el.querySelector(".name").textContent = c.nome || "(sem nome)";
+      const stInfo = PEDIDO_STATUS[c.status];
+      el.querySelector(".name").textContent = (stInfo ? stInfo.emoji+" " : "") + (c.nome || "(sem nome)");
       el.draggable = true;
       el.addEventListener("dragstart", e=> e.dataTransfer.setData("text/plain", c.id));
       el.onclick = ()=> openView(c.id);
@@ -409,6 +494,12 @@ function renderBoard(){
     colEl.appendChild(add);
     wrap.appendChild(colEl);
   }
+  // restaura o scroll capturado antes de reconstruir
+  wrap.scrollLeft = prevScrollLeft;
+  wrap.querySelectorAll(".cards").forEach(el=>{
+    if(prevColScroll[el.dataset.col] != null) el.scrollTop = prevColScroll[el.dataset.col];
+  });
+  window.scrollTo(0, prevPageY);
 }
 function renderUpdated(){
   const u = state.updated[activeBoard];
@@ -456,6 +547,10 @@ function openView(cid){
   document.getElementById("vName").textContent = c.nome || "(sem nome)";
   const colLabel = (BOARDS[c.board].columns.find(x=>x.id===c.column)||{}).label || c.column;
   document.getElementById("vCol").textContent = BOARDS[c.board].label+" · "+colLabel+(c.source==="manual"?" · card manual":"");
+  const stInfo = PEDIDO_STATUS[c.status];
+  const stageWrap = document.getElementById("vStageWrap");
+  if(stInfo){ document.getElementById("vStage").textContent = stInfo.emoji+" "+stInfo.label; stageWrap.classList.remove("hidden"); }
+  else { stageWrap.classList.add("hidden"); }
   const ul = document.getElementById("vProds"); ul.innerHTML="";
   const prods = c.produtos||[];
   if(prods.length===0){ ul.innerHTML = `<li style="color:#b3a595;border-left-color:#d8ccbd">—</li>`; }
@@ -547,55 +642,71 @@ document.getElementById("file").addEventListener("change", function(){
 function importWorkbook(arrayBuffer, board){
   const map = BOARD_STATUS_MAP[board] || {};
   const defCol = BOARD_DEFAULT_COL[board];
+  const F = BOARD_FIELDS[board] || BOARD_FIELDS.pedidos;
+  const prevIds = new Set(Object.keys(state.sheets[board] || {}));  // ids da planilha anterior
+  const get = (r, key) => key ? String(r[key]||"").trim() : "";
+  const idOf = r => { for(const k of F.id){ const v=String(r[k]||"").trim(); if(v) return v; } return ""; };
   const wb = XLSX.read(arrayBuffer, {type:"array"});
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, {defval:""});
   const groups = {};
   for(const r of rows){
-    const id = String(r.id || r.numero_pedido || "").trim();
-    if(!id || !(r.cliente||"").toString().trim()) continue;
+    const id = idOf(r);
+    if(!id || !get(r, F.nome)) continue;
     (groups[id] = groups[id] || []).push(r);
   }
   // Identidade do cliente: CPF (document) -> telefone -> e-mail. Serve pra
   // reconhecer a mesma pessoa entre pedidos diferentes.
   const clientKey = r => {
-    const doc = onlyDigits(r.cliente_document);   if(doc)  return "d:"+doc;
-    const tel = onlyDigits(r.cliente_telefone);   if(tel)  return "t:"+tel;
-    const mail = String(r.cliente_email||"").trim().toLowerCase();
+    const doc = F.document ? onlyDigits(r[F.document]) : "";  if(doc)  return "d:"+doc;
+    const tel = onlyDigits(r[F.telefone]);                    if(tel)  return "t:"+tel;
+    const mail = F.email ? String(r[F.email]||"").trim().toLowerCase() : "";
     return mail ? "e:"+mail : null;
   };
   // Clientes que viraram compradores (algum pedido em transporte/aprovado).
+  // Dedup de cancelados só faz sentido em Pedidos.
   const buyers = new Set();
-  for(const id in groups){
-    const st = String(groups[id][0].status||"").trim();
-    if(SUCCESS_STATUSES.includes(st)){ const k = clientKey(groups[id][0]); if(k) buyers.add(k); }
+  if(board==="pedidos"){
+    for(const id in groups){
+      const st = get(groups[id][0], F.status);
+      if(SUCCESS_STATUSES.includes(st)){ const k = clientKey(groups[id][0]); if(k) buyers.add(k); }
+    }
   }
   const newSheet = {};
   for(const id in groups){
     const g = groups[id];
     const first = g[0];
-    const produtos = g.map(r=>{
-      const q = String(r.quantidade||"").trim();
-      const p = String(r.produto||"").trim();
-      return (q && q!=="1" ? q+"x " : "") + p;
-    }).filter(Boolean);
-    const status = String(first.status||"").trim();
+    const produtos = [];
+    for(const r of g){
+      const p = get(r, F.produto);
+      if(!p) continue;
+      if(F.quantidade){                     // 1 linha = 1 produto, com quantidade
+        const q = get(r, F.quantidade);
+        produtos.push((q && q!=="1" ? q+"x " : "") + p);
+      } else {                              // 1 linha = 1 card; produtos vêm separados por vírgula
+        p.split(",").map(s=>s.trim()).filter(Boolean).forEach(x=>produtos.push(x));
+      }
+    }
+    const status = get(first, F.status);
     let column = map[status] || defCol;
     // Cancelado de quem já comprou depois: card vai pra coluna "Cancelados".
-    if(status===CANCELLED_STATUS){
+    if(board==="pedidos" && status===CANCELLED_STATUS){
       const k = clientKey(first);
       if(k && buyers.has(k)) column = "cancelados";
     }
     newSheet[id] = {
       id,
-      nome: String(first.cliente||"").trim(),
-      telefone: String(first.cliente_telefone||"").trim(),
-      data: String(first.data||"").trim(),
+      nome: get(first, F.nome),
+      telefone: get(first, F.telefone),
+      data: get(first, F.data),
       produtos,
       column,
+      status,               // status cru da planilha (usado p/ emoji/etapa)
     };
   }
   state.sheets[board] = newSheet;
+  // "novos": ids que não estavam na planilha anterior (na 1ª importação não marca ninguém)
+  state.novos[board] = prevIds.size===0 ? [] : Object.keys(newSheet).filter(id=>!prevIds.has(id));
   // reconciliação por board: planilha é fonte de verdade da existência.
   const alive = id=> Object.prototype.hasOwnProperty.call(newSheet, id);
   const mv = state.moves[board] || (state.moves[board]={}); for(const k in mv) if(!alive(k)) delete mv[k];
@@ -632,5 +743,6 @@ document.getElementById("btnSave").onclick = saveEdit;
 document.getElementById("btnDelete").onclick = deleteCard;
 document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ closeModal(); closeChooser(); } });
 
-render();
+// Carrega o estado (servidor ou localStorage) e só então renderiza.
+bootState().then(s=>{ state = s; render(); });
 </script>

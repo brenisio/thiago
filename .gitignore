@@ -3,6 +3,9 @@
 *.xls
 *.csv
 
+# Banco local com dados de clientes (PII) — NÃO versionar
+banco.json
+
 # Artefatos de teste / temporários
 .playwright-mcp/
 *.png
