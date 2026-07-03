@@ -46,6 +46,10 @@
   .tab.active{background:var(--paper);color:var(--ink);box-shadow:0 3px 10px rgba(0,0,0,.28)}
   .spacer{flex:1}
   .updated{color:#b7a693;font-size:12px;letter-spacing:.2px}
+  .search{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#f4ead9;
+    border-radius:10px;padding:9px 13px;font-size:13px;font-weight:600;min-width:190px;outline:none;transition:.15s}
+  .search::placeholder{color:#b7a693;font-weight:600}
+  .search:focus{border-color:var(--caramel);box-shadow:0 0 0 3px rgba(200,138,63,.18);background:rgba(255,255,255,.12)}
   .btn{border:0;border-radius:10px;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:800;transition:.16s;letter-spacing:.2px}
   .btn:focus-visible{outline:2px solid var(--caramel);outline-offset:2px}
   .btn-primary{background:linear-gradient(180deg,var(--caramel),var(--caramel-dk));color:#2a1e12;box-shadow:0 4px 14px rgba(168,111,44,.4)}
@@ -104,6 +108,7 @@
   .add{margin:5px 10px 12px;background:transparent;border:1px dashed transparent;color:var(--muted);
        text-align:left;padding:9px 11px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700;transition:.16s}
   .add:hover{background:#efe7db;color:var(--ink);border-color:var(--hair)}
+  .movebtn{border:1px dashed var(--hair);color:var(--ink-soft)}
   .empty{color:#b3a595;font-size:13px;padding:12px;font-style:italic;text-align:center}
 
   /* ---------- modal ---------- */
@@ -150,6 +155,7 @@
   <div class="brand"><span class="g">👢</span><span><b>Pedidos</b><small>BOARD</small></span></div>
   <div class="tabs" id="tabs"></div>
   <span class="spacer"></span>
+  <input type="search" id="search" class="search" placeholder="🔎 Buscar card…" autocomplete="off">
   <span class="updated" id="updated"></span>
   <button class="btn btn-ghost" id="btnSort" title="Ordenar por data da compra">↓ Mais novos</button>
   <button class="btn btn-primary" id="btnUpdate">Atualizar planilha</button>
@@ -204,6 +210,22 @@
       <label class="btn pick" for="file" data-board="carrinhos" style="--pc:#c99a3f">🛒 &nbsp;Carrinhos abandonados</label>
     </div>
     <div class="modal-actions"><button class="btn btn-line" id="chooserCancel">Cancelar</button></div>
+  </div></div>
+</div>
+
+<!-- Mover card por nome -->
+<div class="overlay" id="moverOverlay">
+  <div class="modal" style="max-width:412px"><div class="modal-body">
+    <h2>Mover card pra cá</h2>
+    <div class="sub" id="moverSub"></div>
+    <div class="field"><label>Nome do card</label>
+      <input id="moverInput" list="moverList" placeholder="Digite o nome do card…" autocomplete="off">
+      <datalist id="moverList"></datalist>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-line" id="moverCancel">Cancelar</button>
+      <button class="btn btn-ok" id="moverGo">Mover</button>
+    </div>
   </div></div>
 </div>
 
@@ -300,6 +322,8 @@ const STATE_URL  = "/api/state";
 let state = defaults();          // temporário; bootState() carrega o real (server/localStorage)
 let activeBoard = "pedidos";
 let pendingImportBoard = "pedidos";
+let searchQuery = "";
+let moverTargetCol = null;
 
 function defaults(){ return {
   sheets:{pedidos:{},carrinhos:{}}, moves:{pedidos:{},carrinhos:{}},
@@ -379,6 +403,8 @@ function fmtPhone(phone){
   return phone||"—";
 }
 function esc(s){ return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+// normaliza p/ busca/comparação de nomes: sem acento, minúsculo
+function norm(s){ return String(s??"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().trim(); }
 function uid(){ return "m"+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function colorOf(colId){ return COLORS[colId] || "#8d8378"; }
 // "dd/mm/aaaa hh:mm:ss" -> timestamp (null se não der pra ler)
@@ -436,7 +462,7 @@ function renderTabs(){
     const b = document.createElement("button");
     b.className = "tab"+(bid===activeBoard?" active":"");
     b.textContent = BOARDS[bid].label;
-    b.onclick = ()=>{ activeBoard=bid; render(); };
+    b.onclick = ()=>{ activeBoard=bid; searchQuery=""; const si=document.getElementById("search"); if(si) si.value=""; render(); };
     t.appendChild(b);
   }
 }
@@ -450,10 +476,12 @@ function renderBoard(){
   wrap.querySelectorAll(".cards").forEach(el=>{ prevColScroll[el.dataset.col] = el.scrollTop; });
   wrap.innerHTML = "";
   const cards = cardsForBoard(activeBoard);
+  const q = norm(searchQuery);                 // busca por nome (sem acento/caixa)
   for(const col of BOARDS[activeBoard].columns){
     const color = colorOf(col.id);
-    // cards "novos" (última importação) sobem pro topo; cada grupo ordenado por data
-    const inCol = cards.filter(c=>c.column===col.id);
+    // filtra pela busca, depois "novos" (última importação) sobem pro topo
+    let inCol = cards.filter(c=>c.column===col.id);
+    if(q) inCol = inCol.filter(c=> norm(c.nome).includes(q));
     const list = sortCards(inCol.filter(c=>c.novo)).concat(sortCards(inCol.filter(c=>!c.novo)));
     const colEl = document.createElement("div");
     colEl.className = "col";
@@ -492,6 +520,10 @@ function renderBoard(){
     add.className="add"; add.textContent="➕ Adicionar card";
     add.onclick = ()=> openAdd(activeBoard, col.id);
     colEl.appendChild(add);
+    const mov = document.createElement("button");
+    mov.className="add movebtn"; mov.textContent="⇄ Mover card pra cá";
+    mov.onclick = ()=> openMover(col.id);
+    colEl.appendChild(mov);
     wrap.appendChild(colEl);
   }
   // restaura o scroll capturado antes de reconstruir
@@ -732,6 +764,48 @@ document.querySelectorAll(".pick").forEach(b=> b.addEventListener("click", ()=>{
   pendingImportBoard = b.dataset.board;
 }));
 
+// ---------- Busca ----------
+document.getElementById("search").addEventListener("input", e=>{
+  searchQuery = e.target.value;
+  renderBoard();
+});
+
+// ---------- Mover card por nome ----------
+const moverOverlay = document.getElementById("moverOverlay");
+function colLabelOf(colId){ return (BOARDS[activeBoard].columns.find(x=>x.id===colId)||{}).label || colId; }
+function openMover(colId){
+  moverTargetCol = colId;
+  document.getElementById("moverSub").textContent = BOARDS[activeBoard].label+" · "+colLabelOf(colId);
+  const dl = document.getElementById("moverList");
+  const nomes = [...new Set(cardsForBoard(activeBoard).map(c=>c.nome).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+  dl.innerHTML = nomes.map(n=>`<option value="${esc(n)}"></option>`).join("");
+  const inp = document.getElementById("moverInput"); inp.value="";
+  moverOverlay.classList.add("open");
+  setTimeout(()=>inp.focus(), 30);
+}
+function closeMover(){ moverOverlay.classList.remove("open"); moverTargetCol=null; }
+function doMover(){
+  const q = document.getElementById("moverInput").value.trim();
+  if(!q) return;
+  const label = colLabelOf(moverTargetCol);
+  const cards = cardsForBoard(activeBoard);
+  const nq = norm(q);
+  let matches = cards.filter(c=> norm(c.nome)===nq);          // nome exato
+  if(matches.length===0) matches = cards.filter(c=> norm(c.nome).includes(nq)); // parcial
+  if(matches.length===0){ alert("Não encontrei nenhum card com esse nome nesta board."); return; }
+  if(matches.length>1){ alert("Há "+matches.length+" cards com “"+q+"”. Seja mais específico ou use o arraste."); return; }
+  const card = matches[0];
+  if(card.column===moverTargetCol){ alert("O card “"+card.nome+"” já está na coluna "+label+"."); return; }
+  if(confirm("Você tem certeza que quer mover o card “"+card.nome+"” para "+label+"?")){
+    moveCard(card.id, moverTargetCol);
+    closeMover();
+  }
+}
+document.getElementById("moverCancel").onclick = closeMover;
+document.getElementById("moverGo").onclick = doMover;
+moverOverlay.addEventListener("click", e=>{ if(e.target===moverOverlay) closeMover(); });
+document.getElementById("moverInput").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); doMover(); } });
+
 document.getElementById("btnSort").onclick = ()=>{
   state.sort = state.sort==="oldest" ? "newest" : "oldest";
   saveState(); render();
@@ -741,7 +815,7 @@ document.getElementById("btnEdit").onclick = openEdit;
 document.getElementById("btnCancelEdit").onclick = ()=>{ if(editing && editing.mode==="add") closeModal(); else openView(editing.id); };
 document.getElementById("btnSave").onclick = saveEdit;
 document.getElementById("btnDelete").onclick = deleteCard;
-document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ closeModal(); closeChooser(); } });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ closeModal(); closeChooser(); closeMover(); } });
 
 // Carrega o estado (servidor ou localStorage) e só então renderiza.
 bootState().then(s=>{ state = s; render(); });

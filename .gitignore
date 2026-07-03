@@ -9,3 +9,6 @@ banco.json
 # Artefatos de teste / temporários
 .playwright-mcp/
 *.png
+
+# Pacote gerado pro cliente (regenerável a partir dos arquivos)
+*.zip

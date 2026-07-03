@@ -83,6 +83,12 @@ _Última atualização: 2026-07-02._
   vence" foi discutida mas **não** implementada.
 - **Scroll preservado**: `renderBoard()` salva/restaura o scroll das colunas + página antes de
   reconstruir (editar/mover/excluir não joga mais o scroll pro topo).
+- **Busca** (`searchQuery` + `norm()`): campo no header filtra os cards das colunas por nome
+  (sem acento/caixa); as contagens acompanham; limpa ao trocar de board. Estado transitório (não salvo).
+- **Mover card por nome** (`openMover`/`doMover`): botão "⇄ Mover card pra cá" por coluna (à parte
+  do "➕"). Acha o card por nome (exato → parcial; datalist com autocomplete). Se já estiver naquela
+  coluna, **avisa e não mostra o confirm**; senão pede "Você tem certeza…" antes de mover. Nome não
+  encontrado/ambíguo → avisa. Tudo em `index.html` (as 2 features não mexem em outro arquivo).
 - **Ordenação** por data (`parseData`/`sortCards`), botão no topo, persistida. Novos vêm antes.
 - **Migração** (`normalizeState`): formato antigo de board única (`state.sheet`) → multi-board;
   e coluna `transporte` (extinta) → `comprou` em sheets/moves/manual. Não remover tão cedo.
@@ -92,6 +98,7 @@ _Última atualização: 2026-07-02._
   excluir, reconciliação, isolamento entre boards.
 - Persistência via servidor (`banco.json`) + fallback `localStorage`. Launcher Windows.
 - Fusão Comprou/Transporte + emoji de etapa. Cards novos destacados. Scroll preservado.
+- Busca por nome nas colunas. Mover card por nome (botão por coluna, com confirmação).
 - Visual tema camurça/espresso.
 
 ## Pontas soltas / decisões abertas
